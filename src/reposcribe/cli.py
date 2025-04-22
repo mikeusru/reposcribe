@@ -1,12 +1,14 @@
-import typer
 import os
 import sys
-import pathspec
+import traceback
 from pathlib import Path
 from typing import List, Optional
-import traceback
 
-from .core import read_gitignore_lines, find_exportable_files, write_export_file
+import pathspec
+import typer
+
+from .core import (find_exportable_files, read_ignore_patterns,
+                   write_export_file)
 
 app = typer.Typer(
     name="reposcribe",
@@ -44,7 +46,8 @@ def main(
     include_tree: bool = typer.Option(
         True, "--tree/--no-tree", help="Include/exclude a file tree."
     ),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    yes: bool = typer.Option(False, "--yes", "-y",
+                             help="Skip confirmation prompt."),
 ):
     """
     Gathers non-ignored files from PROJECT_DIRECTORY, respecting .gitignore,
@@ -79,7 +82,8 @@ def main(
         # Combine directory and filename, then resolve to absolute path
         output_file_path = default_output_dir / default_filename
         output_file_path_str = str(output_file_path.resolve())
-        typer.echo(f"Using default output file: {output_file_path_str}", err=True)
+        typer.echo(
+            f"Using default output file: {output_file_path_str}", err=True)
         # --- End Default Logic ---
     else:
         # User specified an output file, Typer already resolved it
@@ -87,8 +91,12 @@ def main(
 
     # --- 2. Read Ignore Rules & Create PathSpec ---
     gitignore_path = os.path.join(project_root_str, ".gitignore")
+    reposcribe_ignore_path = os.path.join(
+        project_root_str, ".reposcribe_ignore")
+
     typer.echo("Reading ignore rules...", err=True)
-    gitignore_lines = read_gitignore_lines(gitignore_path)
+    ignore_file_paths = [gitignore_path, reposcribe_ignore_path]
+    ignore_patterns = read_ignore_patterns(ignore_file_paths)
 
     # Dynamically ignore the output file (whether specified or defaulted)
     output_rel_path = None
@@ -102,7 +110,7 @@ def main(
                     output_file_path_str, project_root_str
                 )
                 output_rel_path = output_rel_path.replace(os.sep, "/")
-                gitignore_lines.append(output_rel_path)
+                ignore_patterns.append(output_rel_path)
                 typer.echo(
                     f"Dynamically ignoring output file: {output_rel_path}", err=True
                 )
@@ -111,7 +119,7 @@ def main(
 
     try:
         spec = pathspec.PathSpec.from_lines(
-            pathspec.patterns.GitWildMatchPattern, gitignore_lines
+            pathspec.patterns.GitWildMatchPattern, ignore_patterns
         )
     except Exception as e:
         typer.secho(
@@ -124,7 +132,8 @@ def main(
     try:
         files_to_export = find_exportable_files(project_root_str, spec)
     except Exception as e:
-        typer.secho(f"Error scanning directory: {e}", fg=typer.colors.RED, err=True)
+        typer.secho(
+            f"Error scanning directory: {e}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
     # --- 4. Handle No Files Found ---

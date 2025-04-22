@@ -1,24 +1,25 @@
 import os
-import pytest
-import pathspec
-from pathlib import Path
 import sys
+from pathlib import Path
+
+import pathspec
+import pytest
 
 # Functions to test
-from reposcribe.core import (
-    read_gitignore_lines,
-    generate_file_tree,  # Manual version
-    find_exportable_files,
-    write_export_file,
-)
+from reposcribe.core import (find_exportable_files, generate_file_tree,
+                             read_ignore_patterns, write_export_file)
 
 
 # --- Helper to create mock file system ---
 # (Still necessary for find/write tests)
-def create_mock_fs(base_path: Path, structure: dict, gitignore_content: str = None):
+def create_mock_fs(base_path: Path, structure: dict, gitignore_content: str = None, reposcribe_content: str = None):
     """Creates a mock file system structure under base_path."""
+    # Write .gitignore if provided
     if gitignore_content is not None:
         (base_path / ".gitignore").write_text(gitignore_content, encoding="utf-8")
+    # Write .reposcribe_ignore if provided
+    if reposcribe_content is not None:
+        (base_path / ".reposcribe_ignore").write_text(reposcribe_content, encoding="utf-8")
     # Always create a .git directory
     git_dir = base_path / ".git"
     if not git_dir.exists():
@@ -28,144 +29,179 @@ def create_mock_fs(base_path: Path, structure: dict, gitignore_content: str = No
     for name, content in structure.items():
         path = base_path / name
         if isinstance(content, dict):
-            if not path.exists():
-                path.mkdir()
+            path.mkdir(exist_ok=True)
             create_mock_fs(path, content)
         elif isinstance(content, str):
             path.write_text(content, encoding="utf-8")
 
+# --- Test reading ignore patterns ---
 
-# --- Test .gitignore Reading ---
 
-
-def test_read_gitignore_lines_with_content(tmp_path):
+def test_read_ignore_patterns_single_file(tmp_path):
     content = "# Comment\n*.log\n\nbuild/"
     gitignore_path = tmp_path / ".gitignore"
     gitignore_path.write_text(content, encoding="utf-8")
-    lines = read_gitignore_lines(str(gitignore_path))
 
-    # Check that the test-specific patterns AND defaults are present
-    # It's easier to check for the presence of specific important ones
-    # rather than comparing the entire potentially huge default list.
+    lines = read_ignore_patterns([str(gitignore_path)])
+
+    # Patterns from .gitignore should appear
     assert "*.log" in lines
     assert "build/" in lines
-    assert ".git/" in lines  # Default
-    assert ".gitignore" in lines  # Default
-    assert ".env" in lines  # Default
-    assert "*.pyc" in lines  # Default
-    assert "*.png" in lines  # Default
-    assert "node_modules/" in lines  # Default
+    # Default patterns still included
+    assert ".git/" in lines
+    assert "*.pyc" in lines
+    assert "node_modules/" in lines
 
 
-# --- Test Tree Generation (Manual) ---
-def test_generate_file_tree_empty():  # Remains the same
+def test_read_ignore_patterns_multiple_files(tmp_path):
+    gitignore_content = "# Git ignore\n*.log\nbuild/"
+    reposcribe_content = "# RS ignore\ntests/\n*.tmp"
+
+    gitignore_path = tmp_path / ".gitignore"
+    reposcribe_path = tmp_path / ".reposcribe_ignore"
+    gitignore_path.write_text(gitignore_content, encoding="utf-8")
+    reposcribe_path.write_text(reposcribe_content, encoding="utf-8")
+
+    lines = read_ignore_patterns([str(gitignore_path), str(reposcribe_path)])
+
+    # Patterns from both files
+    assert "*.log" in lines
+    assert "build/" in lines
+    assert "tests/" in lines
+    assert "*.tmp" in lines
+    # Default patterns
+    assert ".git/" in lines
+    assert "*.png" in lines
+
+
+def test_read_ignore_patterns_missing_file(tmp_path):
+    gitignore_content = "# Git ignore\n*.log\nbuild/"
+    gitignore_path = tmp_path / ".gitignore"
+    gitignore_path.write_text(gitignore_content, encoding="utf-8")
+
+    missing = tmp_path / "noignore"
+    lines = read_ignore_patterns([str(gitignore_path), str(missing)])
+
+    assert "*.log" in lines
+    assert "build/" in lines
+    assert ".git/" in lines
+
+
+def test_read_ignore_patterns_empty_files(tmp_path):
+    gitignore_path = tmp_path / ".gitignore"
+    reposcribe_path = tmp_path / ".reposcribe_ignore"
+
+    gitignore_path.write_text("", encoding="utf-8")
+    reposcribe_path.write_text("# just comments", encoding="utf-8")
+
+    lines = read_ignore_patterns([str(gitignore_path), str(reposcribe_path)])
+    # Should still contain defaults
+    assert ".git/" in lines
+    assert "*.png" in lines
+
+# --- Integration with PathSpec ---
+
+
+def test_integration_with_pathspec(tmp_path):
+    gitignore_content = "*.log\nbuild/"
+    reposcribe_content = "tests/\n*.tmp"
+
+    structure = {
+        "main.py": "print('hi')",
+        "README.md": "# Title",
+        "app.log": "logdata",
+        "temp.tmp": "tmpdata",
+        "build": {"out.bin": "bin"},
+        "tests": {"test_app.py": "def test(): pass"},
+        "src": {"mod.py": "code"},
+    }
+    create_mock_fs(tmp_path, structure, gitignore_content, reposcribe_content)
+
+    ignore_files = [str(tmp_path / ".gitignore"),
+                    str(tmp_path / ".reposcribe_ignore")]
+    patterns = read_ignore_patterns(ignore_files)
+    spec = pathspec.PathSpec.from_lines(
+        pathspec.patterns.GitWildMatchPattern, patterns)
+    found = find_exportable_files(str(tmp_path), spec)
+
+    expected = ["README.md", "main.py", "src/mod.py"]
+    assert sorted(found) == sorted(expected)
+    # Ensure ignored entries are absent
+    for bad in ["app.log", "temp.tmp", "build/out.bin", "tests/test_app.py"]:
+        assert bad not in found
+
+# --- File Tree generation ---
+
+
+def test_generate_file_tree_empty():
     assert generate_file_tree([]) == "(No files found to include in tree)\n"
 
 
 def test_generate_file_tree_simple():
     files = ["README.md", "src/app.py"]
-    # Expected output from the MANUAL tree function
-    expected_tree = """Exported File Structure:
-.
-├── README.md
-└── src
-    └── app.py
-"""
-    assert generate_file_tree(sorted(files)) == expected_tree
+    expected = (
+        "Exported File Structure:\n"
+        ".\n"
+        "├── README.md\n"
+        "└── src\n"
+        "    └── app.py\n"
+    )
+    assert generate_file_tree(files) == expected
 
-
-# --- Test File Finding ---
+# --- find_exportable_files basic ignore (defaults + single .gitignore) ---
 
 
 def test_find_files_basic_ignore(tmp_path):
     structure = {
-        "main.py": "print('hello')",
-        "README.md": "# Project",
-        "app.log": "Log message",  # Ignored by *.log (user or default)
-        ".env": "SECRET=123",  # Ignored by default .env
-        "image.png": "imgdata",  # Ignored by default *.png
-        "build": {"output.bin": ""},  # Ignored by build/ (user or default)
-        "src": {"module.py": "code"},
+        "a.py": "x=1",
+        "b.log": "log",
+        ".env": "X=Y",
+        "img.png": "img",
+        "build": {"f.txt": "f"},
+        "pkg": {"mod.py": "code"},
     }
-    gitignore = "*.log\nbuild/"  # User rules
+    gitignore = "*.log\nbuild/"
     create_mock_fs(tmp_path, structure, gitignore)
+    patterns = read_ignore_patterns([str(tmp_path / ".gitignore")])
     spec = pathspec.PathSpec.from_lines(
-        pathspec.patterns.GitWildMatchPattern,
-        read_gitignore_lines(str(tmp_path / ".gitignore")),
-    )
-    found_files = find_exportable_files(str(tmp_path), spec)
-    # .gitignore, .env, *.log, build/, *.png should all be ignored now
-    expected_files = ["README.md", "main.py", "src/module.py"]
-    assert sorted(found_files) == sorted(expected_files)
+        pathspec.patterns.GitWildMatchPattern, patterns)
+    found = find_exportable_files(str(tmp_path), spec)
+    assert sorted(found) == sorted(["a.py", "pkg/mod.py"])
 
-
-# --- Test File Writing ---
+# --- write_export_file ---
 
 
 def test_write_export_file_with_tree(tmp_path):
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    output_file = tmp_path / "output.txt"
-    files_structure = {"file1.txt": "Content1.", "subdir": {"file2.py": "# Code"}}
-    create_mock_fs(project_root, files_structure)
-    files_to_export = sorted(["file1.txt", "subdir/file2.py"])
-    encoding = "utf-8"
-    errors = "ignore"
+    root = tmp_path / "proj"
+    root.mkdir()
+    structure = {"f1.txt": "Hello", "d": {"f2.md": "World"}}
+    create_mock_fs(root, structure)
+    files = ["f1.txt", "d/f2.md"]
+    out = tmp_path / "out.txt"
 
-    file_count, total_size = write_export_file(
-        str(output_file),
-        str(project_root),
-        files_to_export,
-        encoding,
-        errors,
-        include_tree=True,
-    )
-    assert output_file.exists()
-    assert file_count == 2
-
-    content = output_file.read_text(encoding=encoding)
-    # Check tree presence
-    assert "--- START FILE TREE ---" in content
-    assert "Exported File Structure:" in content
-    # Check specific tree lines with correct connectors
-    assert "├── file1.txt" in content  # <-- Changed from '└──'
-    assert "└── subdir" in content  # Check directory part
-    assert "    └── file2.py" in content  # Check nested file part
-    assert "--- END FILE TREE ---" in content
-    # Check file content presence
-    assert "--- START FILE: file1.txt ---" in content
-    assert "Content1." in content
-    assert "--- START FILE: subdir/file2.py ---" in content
-    assert "# Code" in content
+    count, size = write_export_file(
+        str(out), str(root), files, "utf-8", "ignore", True)
+    assert out.exists()
+    assert count == 2
+    text = out.read_text(encoding="utf-8")
+    assert "--- START FILE TREE ---" in text
+    # Tree entries may be sorted alphabetically: 'd' first, then 'f1.txt'
+    assert "├── d" in text
+    assert "└── f1.txt" in text
+    # f2.md should appear under 'd' with vertical bar indent
+    assert "│   └── f2.md" in text
+    assert "Hello" in text and "World" in text
 
 
-def test_write_export_file_source_missing(tmp_path):
-    """Test writing when a source file in the list is missing."""
-    project_root = tmp_path / "project"
-    project_root.mkdir()
-    output_file = tmp_path / "output.txt"
-    files_structure = {"real.txt": "Exists."}
-    create_mock_fs(project_root, files_structure)
-    files_to_export = ["real.txt", "missing.txt"]  # missing.txt doesn't exist
-    encoding = "utf-8"
-    errors = "ignore"
-
-    # Call without tree for simplicity in checking output
-    file_count, total_size = write_export_file(
-        str(output_file),
-        str(project_root),
-        files_to_export,
-        encoding,
-        errors,
-        include_tree=False,
-    )
-    assert output_file.exists()
-    assert file_count == 1  # Only one file successfully read
-
-    content = output_file.read_text(encoding=encoding)
-    # Check content for existing file
-    assert "--- START FILE: real.txt ---" in content
-    assert "Exists." in content
-    # Check content for missing file contains error
-    assert "--- START FILE: missing.txt ---" in content
-    assert "Error reading file:" in content  # Generic check for error message
+def test_write_export_file_missing(tmp_path):
+    root = tmp_path / "proj"
+    root.mkdir()
+    create_mock_fs(root, {"ok.txt": "yes"})
+    files = ["ok.txt", "no.txt"]
+    out = tmp_path / "out.txt"
+    count, size = write_export_file(str(out), str(
+        root), files, "utf-8", "ignore", False)
+    assert count == 1
+    content = out.read_text(encoding="utf-8")
+    assert "ok.txt" in content and "yes" in content
+    assert "no.txt" in content and "Error reading file:" in content

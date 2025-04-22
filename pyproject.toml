@@ -8,10 +8,14 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = ["typer[all] (>=0.15.2,<0.16.0)", "pathspec (>=0.12.1,<0.13.0)"]
 
+[project.optional-dependencies]
+dev = ["pytest-cov"]
+
 [tool.poetry]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.5"
+pytest-cov = "^6.1.1"
 
 [tool.poetry.scripts]
 reposcribe = "reposcribe.cli:app"
@@ -19,3 +23,10 @@ reposcribe = "reposcribe.cli:app"
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=reposcribe --cov-report=term-missing"

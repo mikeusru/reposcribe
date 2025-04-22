@@ -7,6 +7,7 @@ Built with Python, Poetry, Typer, pathspec, and anytree.
 ## Features
 
 * Includes built-in ignores for common unwanted files (e.g., `.env`, `*.log`, `*.pyc`, `node_modules/`, images, lock files) in addition to your project's `.gitignore`.
+* Supports project-specific `.reposcribe_ignore` files for excluding files only from RepoScribe without affecting version control.
 * Automatically ignores the `.git` directory.
 * Automatically ignores the output file if it resides within the project directory.
 * Recursively scans the project directory.
@@ -70,6 +71,21 @@ If you’d like to invoke `reposcribe` from anywhere—without activating a virt
    pipx uninstall reposcribe
    ```
 
+## Ignore Files
+
+RepoScribe respects two types of ignore files:
+
+1. **`.gitignore`**: Standard Git ignore patterns in your project root
+2. **`.reposcribe_ignore`**: Optional RepoScribe-specific ignore patterns
+
+The `.reposcribe_ignore` file uses the same pattern format as `.gitignore` but is only used by RepoScribe. This allows you to exclude files from your scribing output without affecting version control.
+
+For example, you might want to include your unit tests in version control but exclude them from your LLM context file to save tokens. You can add this to `.reposcribe_ignore`:
+
+```
+# Exclude tests from LLM context
+tests/
+```
 
 ### Arguments:
 
@@ -143,4 +159,4 @@ To contribute or modify the tool:
 
 ## License
 
-Distributed under the MIT License. 
+Distributed under the MIT License.
