@@ -63,7 +63,7 @@ If you’d like to invoke `reposcribe` from anywhere—without activating a virt
 
 4. **After making updates** to your code, refresh the pipx install:
    ```bash
-   pipx upgrade --editable .
+   pipx upgrade reposcribe
    ```
 
 5. **To uninstall** RepoScribe:
