@@ -35,16 +35,41 @@ Ensure you have Python (3.12+ recommended) and Poetry installed.
 
 ## Usage
 
-Activate the virtual environment created by Poetry:
-
+### Option 1: Running from inside the reposcribe project:
 ```bash
-poetry shell
+poetry run reposcribe <PROJECT_DIRECTORY> <OUTPUT_FILE> [OPTIONS]
 ```
+### Option 2: Global Installation via pipx
 
-Then, run the command:
-```bash
-reposcribe <PROJECT_DIRECTORY> <OUTPUT_FILE> [OPTIONS]
-```
+If you’d like to invoke `reposcribe` from anywhere—without activating a virtualenv—use **pipx** to install it into its own isolated environment:
+
+1. **Install pipx** (if you don’t already have it):
+   ```bash
+   python3 -m pip install --user pipx
+   python3 -m pipx ensurepath
+   ```
+   > After running the above, restart your shell so that `pipx` is on your `PATH`.
+
+2. **Install RepoScribe in editable mode** (from your project root):
+   ```bash
+   pipx install --editable .
+   ```
+
+3. **Run the CLI from any directory**, no `poetry shell` needed:
+   ```bash
+   reposcribe /path/to/your/dir output.txt
+   ```
+
+4. **After making updates** to your code, refresh the pipx install:
+   ```bash
+   pipx upgrade --editable .
+   ```
+
+5. **To uninstall** RepoScribe:
+   ```bash
+   pipx uninstall reposcribe
+   ```
+
 
 ### Arguments:
 
